@@ -14,6 +14,7 @@ import android.support.v4.content.ContextCompat;
 import android.text.TextUtils;
 
 import com.facebook.react.bridge.Arguments;
+import com.facebook.react.bridge.JavaOnlyMap;
 import com.facebook.react.bridge.Promise;
 import com.facebook.react.bridge.ReactApplicationContext;
 import com.facebook.react.bridge.ReactContextBaseJavaModule;
@@ -28,6 +29,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.HashSet;
@@ -39,6 +41,21 @@ import host.exp.exponent.analytics.EXL;
 
 import static android.provider.ContactsContract.*;
 
+abstract class QueryItem {
+  final String CONTENT_ITEM_TYPE;
+  final String queryFieldId;
+  final List<String> Projections;
+
+  public QueryItem(String contentItemType, List<String> projections, String queryFieldId) {
+    CONTENT_ITEM_TYPE = contentItemType;
+    Projections = projections;
+    this.queryFieldId = queryFieldId;
+  }
+
+
+  abstract ReadableMap map(Cursor cursor);
+  }
+}
 public class ContactsModule extends ReactContextBaseJavaModule {
   private static final String TAG = ContactsModule.class.getSimpleName();
 
@@ -57,9 +74,72 @@ public class ContactsModule extends ReactContextBaseJavaModule {
     add(CommonDataKinds.Organization.DEPARTMENT);
   }};
 
+  private static final Map<String, QueryItem> PROJECTION = new HashMap<String, QueryItem>() {{
+    put(CommonDataKinds.Phone.CONTENT_ITEM_TYPE, new QueryItem(CommonDataKinds.Phone.CONTENT_ITEM_TYPE, new ArrayList<String>() {{
+      add(CommonDataKinds.Phone.NUMBER);
+      add(CommonDataKinds.Phone.TYPE);
+      add(CommonDataKinds.Phone.LABEL);
+      add(CommonDataKinds.Phone.IS_PRIMARY);
+      add(CommonDataKinds.Phone._ID);
+    }}, "phoneNumbers") {
+      @Override
+      ReadableMap map(Cursor cursor) {
+        WritableArray phoneNumbers = Arguments.createArray();
+
+        String phoneNumber = cursor.getString(cursor.getColumnIndex(CommonDataKinds.Phone.NUMBER));
+        int type = cursor.getInt(cursor.getColumnIndex(CommonDataKinds.Phone.TYPE));
+        int isPrimary = cursor.getInt(cursor.getColumnIndex(CommonDataKinds.Phone.IS_PRIMARY));
+        String id = String.valueOf(cursor.getLong(cursor.getColumnIndex(CommonDataKinds.Phone._ID)));
+
+        if (!TextUtils.isEmpty(phoneNumber)) {
+          String label;
+          switch (type) {
+            case CommonDataKinds.Phone.TYPE_HOME:
+              label = "home";
+              break;
+            case CommonDataKinds.Phone.TYPE_WORK:
+              label = "work";
+              break;
+            case CommonDataKinds.Phone.TYPE_MOBILE:
+              label = "mobile";
+              break;
+            case CommonDataKinds.Phone.TYPE_OTHER:
+              label = "other";
+              break;
+            case CommonDataKinds.Phone.TYPE_CUSTOM:
+              label = "custom";
+              break;
+            default:
+              label = "unknown";
+          }
+          WritableMap details = Arguments.createMap();
+          return map;
+          contact.phones.add(new Contact.Item(label, phoneNumber, isPrimary, id));
+      }
+
+      {
+
+    }});
+    put(CommonDataKinds.Email.CONTENT_ITEM_TYPE, new QueryItem(CommonDataKinds.Email.CONTENT_ITEM_TYPE, new ArrayList<String>() {{
+      add(CommonDataKinds.Email.DATA);
+      add(CommonDataKinds.Email.ADDRESS);
+      add(CommonDataKinds.Email.TYPE);
+      add(CommonDataKinds.Email.LABEL);
+      add(CommonDataKinds.Email.IS_PRIMARY);
+      add(CommonDataKinds.Email._ID);
+    }}, "emails") {
+      @Override
+      ReadableMap map(Cursor cursor) {
+        return null;
+      }
+    });
+  }};
+
   private static List<String> FULL_PROJECTION = new ArrayList<String>() {{
     addAll(JUST_ME_PROJECTION);
   }};
+
+
 
   public ContactsModule(ReactApplicationContext reactContext) {
     super(reactContext);
@@ -104,26 +184,15 @@ public class ContactsModule extends ReactContextBaseJavaModule {
       String selection = ContactsContract.Data.MIMETYPE + "=? OR " +
           ContactsContract.Data.MIMETYPE + "=?";
 
-      // handle "add on" fields from query request
-      if (fieldsSet.contains("phoneNumbers")) {
-        FULL_PROJECTION.add(CommonDataKinds.Phone.NUMBER);
-        FULL_PROJECTION.add(CommonDataKinds.Phone.TYPE);
-        FULL_PROJECTION.add(CommonDataKinds.Phone.LABEL);
-        FULL_PROJECTION.add(CommonDataKinds.Phone.IS_PRIMARY);
-        FULL_PROJECTION.add(CommonDataKinds.Phone._ID);
-        selection += " OR " + ContactsContract.Data.MIMETYPE + "=?";
-        selectionArgs.add(CommonDataKinds.Phone.CONTENT_ITEM_TYPE);
-      }
-
-      if (fieldsSet.contains("emails")) {
-        FULL_PROJECTION.add(CommonDataKinds.Email.DATA);
-        FULL_PROJECTION.add(CommonDataKinds.Email.ADDRESS);
-        FULL_PROJECTION.add(CommonDataKinds.Email.TYPE);
-        FULL_PROJECTION.add(CommonDataKinds.Email.LABEL);
-        FULL_PROJECTION.add(CommonDataKinds.Email.IS_PRIMARY);
-        FULL_PROJECTION.add(CommonDataKinds.Email._ID);
-        selection += " OR " + ContactsContract.Data.MIMETYPE + "=?";
-        selectionArgs.add(CommonDataKinds.Email.CONTENT_ITEM_TYPE);
+    // handle "add on" fields from query request
+    for (Map.Entry<String, QueryItem> entry : PROJECTION.entrySet())
+      {
+        QueryItem item = entry.getValue();
+        if (fieldsSet.contains(.queryFieldId)) {
+          FULL_PROJECTION.addAll(item.Projections);
+          selection += " OR " + ContactsContract.Data.MIMETYPE + "=?";
+          selectionArgs.add(item.CONTENT_ITEM_TYPE);
+        }
       }
 
       if (fieldsSet.contains("addresses")) {
@@ -273,7 +342,7 @@ public class ContactsModule extends ReactContextBaseJavaModule {
       }
 
       Contact contact = map.get(contactId);
-
+      WritableMap contact2 = new JavaOnlyMap();
       String mimeType = cursor.getString(cursor.getColumnIndex(ContactsContract.Data.MIMETYPE));
 
       String name = cursor.getString(cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
@@ -287,6 +356,12 @@ public class ContactsModule extends ReactContextBaseJavaModule {
           contact.photoUri = rawPhotoURI;
           contact.hasPhoto = true;
         }
+      }
+
+      if (PROJECTION.containsKey(mimeType)) {
+        QueryItem item = PROJECTION.get(mimeType);
+        contact2.merge(item.map(cursor));
+
       }
 
       if (mimeType.equals(CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)) {
